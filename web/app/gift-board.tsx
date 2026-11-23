@@ -80,6 +80,8 @@ export default function GiftBoard({
 
   const personDialog = useRef<HTMLDialogElement>(null);
   const loginDialog = useRef<HTMLDialogElement>(null);
+  const photoDialog = useRef<HTMLDialogElement>(null);
+  const [badSrc, setBadSrc] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const busyRef = useRef(busy);
   useEffect(() => {
@@ -350,6 +352,7 @@ export default function GiftBoard({
 
   /* ---------- render ---------- */
   const shotSrc = pending?.url ?? (current?.received && current.photo && isAdmin ? photoSrc(current.photo) : "");
+  const shotOk = !!shotSrc && shotSrc !== badSrc; // false when the saved photo failed to load
 
   return (
     <>
@@ -521,10 +524,28 @@ export default function GiftBoard({
 
             {isAdmin ? (
               <>
-                <button type="button" className={`shot${shotSrc ? " has" : ""}`} onClick={pickPhoto} disabled={!!busy}>
-                  {shotSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={shotSrc} alt={`รูปของขวัญจาก ${current.nickname || current.name}`} />
+                <button
+                  type="button"
+                  className={`shot${shotOk ? " has" : ""}`}
+                  onClick={shotOk ? () => photoDialog.current?.showModal() : pickPhoto}
+                  disabled={!!busy}
+                >
+                  {shotOk ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={shotSrc}
+                        alt={`รูปของขวัญจาก ${current.nickname || current.name}`}
+                        onError={() => setBadSrc(shotSrc)}
+                      />
+                      <span className="zoom-hint">แตะเพื่อดูรูปใหญ่</span>
+                    </>
+                  ) : shotSrc ? (
+                    <span>
+                      <CameraIcon size={40} stroke={1.6} />
+                      <strong>เปิดรูปนี้ไม่ได้</strong>
+                      แตะเพื่อถ่ายรูปใหม่
+                    </span>
                   ) : (
                     <span>
                       <CameraIcon size={40} stroke={1.6} />
@@ -613,6 +634,22 @@ export default function GiftBoard({
             </div>
           </form>
         )}
+      </dialog>
+
+      {/* full-size photo */}
+      <dialog
+        ref={photoDialog}
+        className="lightbox"
+        aria-label="รูปของขวัญ"
+        onClick={() => photoDialog.current?.close()}
+      >
+        {shotOk && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={shotSrc} alt={`รูปของขวัญจาก ${current?.nickname || current?.name || ""}`} />
+        )}
+        <button className="close lightbox-close" type="button" aria-label="ปิดรูป" onClick={() => photoDialog.current?.close()}>
+          ✕
+        </button>
       </dialog>
 
       <div className={`toast${toastMsg ? " show" : ""}`} role="status" aria-live="polite">

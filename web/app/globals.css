@@ -151,6 +151,25 @@ dialog[open] { animation: rise .25s cubic-bezier(.2,.8,.2,1); }
 .shot > span { display: block; padding: 16px; }
 .shot svg { display: block; margin: 0 auto; }
 .shot:disabled { cursor: progress; }
+.shot.has { cursor: zoom-in; }
+.zoom-hint {
+  position: absolute; right: 10px; bottom: 10px; padding: 4px 10px !important; border-radius: 999px;
+  background: rgba(14,22,40,.72); color: #fff; font-size: 12.5px; line-height: 1.4; pointer-events: none;
+}
+
+/* ---------- full-size photo ---------- */
+dialog.lightbox {
+  position: fixed; inset: 0; margin: 0; width: 100vw; max-width: none; height: 100dvh; max-height: none;
+  border-radius: 0; background: #0E1628; display: none; place-items: center; cursor: zoom-out;
+}
+dialog.lightbox[open] { display: grid; animation: fade .18s ease-out; }
+dialog.lightbox::backdrop { background: #0E1628; }
+.lightbox img { max-width: 100vw; max-height: 100dvh; object-fit: contain; display: block; }
+.lightbox-close {
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px;
+  background: rgba(255,255,255,.18); color: #fff; width: 40px; height: 40px;
+}
+@keyframes fade { from { opacity: 0; } }
 .close:disabled { opacity: .4; }
 .received-note { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
 
