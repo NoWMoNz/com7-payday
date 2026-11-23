@@ -4,6 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person } from "@/lib/people";
 
 type Filter = "pending" | "got" | "all";
+type Fx = "celebrate" | "remote" | "plain";
+
+const LEAVE_MS = 420; // matches the .leaving collapse in globals.css
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const without = <T,>(o: Record<number, T>, k: number) => {
+  const next = { ...o };
+  delete next[k];
+  return next;
+};
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 const timeOf = (ts: string) => /(\d{1,2}:\d{2})/.exec(ts)?.[1] ?? "";
@@ -85,12 +94,79 @@ export default function GiftBoard({
     toastTimer.current = setTimeout(() => setToastMsg(""), 2600);
   }, []);
 
+  /* ---------- motion ---------- */
+  const [fx, setFx] = useState<Record<number, Fx>>({});
+  const [held, setHeld] = useState<Record<number, "stay" | "leaving">>({});
+  const [shine, setShine] = useState(0); // bumps each time the received count goes up
+  const [confetti, setConfetti] = useState(0);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timers.current.delete(id);
+      fn();
+    }, ms);
+    timers.current.add(id);
+  }, []);
+
+  /** Highlight a row that just changed and keep it on screen a moment before it leaves a filtered list. */
+  const mark = useCallback(
+    (row: number, kind: Fx, holdMs: number) => {
+      if (reducedMotion()) return;
+      setFx((f) => ({ ...f, [row]: kind }));
+      setHeld((h) => ({ ...h, [row]: "stay" }));
+      later(() => setHeld((h) => (h[row] ? { ...h, [row]: "leaving" } : h)), holdMs);
+      later(() => {
+        setHeld((h) => without(h, row));
+        setFx((f) => without(f, row));
+      }, holdMs + LEAVE_MS);
+    },
+    [later]
+  );
 
   /* ---------- data ---------- */
+  const peopleRef = useRef(initialPeople);
+
+  /** Every change to the list goes through here so the ribbon, confetti and row highlights can react. */
+  const commit = useCallback(
+    (next: Person[], fromServer = false) => {
+      const prev = peopleRef.current;
+      peopleRef.current = next;
+      setPeople(next);
+      if (reducedMotion()) return;
+
+      const count = (list: Person[]) => list.filter((p) => p.received).length;
+      const before = count(prev);
+      const after = count(next);
+      if (after > before) setShine((k) => k + 1);
+
+      const wasDone = prev.length > 0 && before === prev.length;
+      if (next.length > 0 && after === next.length && !wasDone) {
+        setConfetti((k) => k + 1);
+        later(() => setConfetti(0), 3800);
+      }
+
+      if (fromServer) {
+        // rows another admin changed since our last look; a big batch (phone woke up) just updates quietly
+        const old = new Map(prev.map((p) => [p.row, p]));
+        const changed = next.filter((p) => {
+          const o = old.get(p.row);
+          return o && o.code === p.code && o.received !== p.received;
+        });
+        if (changed.length <= 6) changed.forEach((p) => mark(p.row, "remote", 1600));
+      }
+    },
+    [later, mark]
+  );
+
   const refresh = useCallback(async () => {
     try {
       const data = await api<{ people: Person[]; adminName: string | null }>("/api/people");
-      setPeople(data.people);
+      commit(data.people, true);
       setAdminName(data.adminName);
       setUpdatedAt(
         new Date().toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -98,7 +174,7 @@ export default function GiftBoard({
     } catch {
       /* keep showing the last data; next poll will retry */
     }
-  }, []);
+  }, [commit]);
 
   const handleError = useCallback(
     (e: unknown) => {
@@ -130,15 +206,19 @@ export default function GiftBoard({
   const got = scoped.filter((p) => p.received).length;
   const pct = total ? Math.round((got / total) * 100) : 0;
 
+  const outOfFilter = useCallback(
+    (p: Person) => (filter === "pending" && p.received) || (filter === "got" && !p.received),
+    [filter]
+  );
+
   const rows = useMemo(() => {
     const needle = norm(q);
     return scoped.filter((p) => {
-      if (filter === "pending" && p.received) return false;
-      if (filter === "got" && !p.received) return false;
+      if (outOfFilter(p) && !held[p.row]) return false;
       if (!needle) return true;
       return [p.name, p.nickname, p.nickShort, p.code, p.dept, p.position].some((v) => norm(v).includes(needle));
     });
-  }, [scoped, filter, q]);
+  }, [scoped, outOfFilter, held, q]);
 
   const emptyText = q
     ? `ไม่พบ "${q}" ลองค้นด้วยชื่อเล่นหรือรหัสพนักงาน`
@@ -182,7 +262,7 @@ export default function GiftBoard({
     }
   };
 
-  const replacePerson = (p: Person) => setPeople((list) => list.map((x) => (x.row === p.row ? p : x)));
+  const replacePerson = (p: Person) => commit(peopleRef.current.map((x) => (x.row === p.row ? p : x)));
 
   const save = async () => {
     if (!current || !pending) return;
@@ -194,6 +274,7 @@ export default function GiftBoard({
       form.set("code", current.code);
       form.set("photo", pending.blob, "gift.jpg");
       const { person } = await api<{ person: Person }>("/api/receive", { method: "POST", body: form });
+      if (!wasReceived) mark(person.row, "celebrate", 900);
       replacePerson(person);
       closePerson();
       const who = person.nickname || person.name;
@@ -217,6 +298,7 @@ export default function GiftBoard({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ row: current.row, code: current.code }),
       });
+      mark(person.row, "plain", 150);
       replacePerson(person);
       closePerson();
       toast(`ยกเลิกการรับของ ${who} แล้ว`);
@@ -262,7 +344,7 @@ export default function GiftBoard({
   const onLogout = async () => {
     await api("/api/logout", { method: "POST" }).catch(() => {});
     setAdminName(null);
-    setPeople((list) => list.map((p) => ({ ...p, photo: undefined, checkedBy: undefined })));
+    commit(peopleRef.current.map((p) => ({ ...p, photo: undefined, checkedBy: undefined })));
     toast("ออกจากระบบแล้ว");
   };
 
@@ -289,19 +371,26 @@ export default function GiftBoard({
 
           <div className="tally">
             <div className="tally-line">
-              <span className="tally-done">{got}</span>
+              <span key={shine} className={`tally-done${shine ? " bump" : ""}`}>
+                {got}
+              </span>
               <span className="tally-of">จากทั้งหมด {total} คน ส่งของขวัญแล้ว</span>
               <span className="tally-pct">{pct}%</span>
             </div>
-            <div
-              className="ribbon"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={pct}
-              aria-label="สัดส่วนคนที่ส่งของขวัญแล้ว"
-            >
-              <div className="ribbon-fill" style={{ width: `${pct}%` }} />
+            <div className="ribbon-wrap">
+              <div
+                className={`ribbon${total > 0 && got === total ? " full" : ""}`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={pct}
+                aria-label="สัดส่วนคนที่ส่งของขวัญแล้ว"
+              >
+                <div className="ribbon-fill" style={{ width: `${pct}%` }}>
+                  {shine > 0 && <span key={shine} className="ribbon-shine" />}
+                </div>
+              </div>
+              {total > 0 && got === total && <Bow />}
             </div>
           </div>
 
@@ -343,43 +432,45 @@ export default function GiftBoard({
       <main>
         <ul className="list">
           {rows.map((p) => (
-            <li key={p.row}>
-              <button
-                type="button"
-                className={`row${isAdmin ? " admin" : ""}${p.received ? " got" : ""}`}
-                onClick={() => openPerson(p.row)}
-              >
-                <span className="who-col">
-                  <span className="nick">{p.nickname || p.name}</span>
-                  <span className="full">{p.name}</span>
-                  <span className="meta">
-                    {p.position}
-                    {p.company ? `, ${p.company}` : ""}
+            <li key={p.row} className={held[p.row] === "leaving" && outOfFilter(p) ? "leaving" : undefined}>
+              <div>
+                <button
+                  type="button"
+                  className={`row${isAdmin ? " admin" : ""}${p.received ? " got" : ""}${fx[p.row] ? ` ${fx[p.row]}` : ""}`}
+                  onClick={() => openPerson(p.row)}
+                >
+                  <span className="who-col">
+                    <span className="nick">{p.nickname || p.name}</span>
+                    <span className="full">{p.name}</span>
+                    <span className="meta">
+                      {p.position}
+                      {p.company ? `, ${p.company}` : ""}
+                    </span>
                   </span>
-                </span>
-                <span className="mark">
-                  {p.received ? (
-                    <>
-                      <span className="dot" aria-hidden="true">
-                        <CheckIcon />
-                      </span>
-                      ส่งแล้ว {timeOf(p.receivedAt)}
-                    </>
-                  ) : isAdmin ? (
-                    <>
-                      <span className="dot" aria-hidden="true">
-                        <CameraIcon size={16} stroke={2.2} />
-                      </span>
-                      รับของ
-                    </>
-                  ) : (
-                    <>
-                      <span className="dot" aria-hidden="true" />
-                      ยังไม่ส่ง
-                    </>
-                  )}
-                </span>
-              </button>
+                  <span className="mark">
+                    {p.received ? (
+                      <>
+                        <span className="dot" aria-hidden="true">
+                          <CheckIcon />
+                        </span>
+                        ส่งแล้ว {timeOf(p.receivedAt)}
+                      </>
+                    ) : isAdmin ? (
+                      <>
+                        <span className="dot" aria-hidden="true">
+                          <CameraIcon size={16} stroke={2.2} />
+                        </span>
+                        รับของ
+                      </>
+                    ) : (
+                      <>
+                        <span className="dot" aria-hidden="true" />
+                        ยังไม่ส่ง
+                      </>
+                    )}
+                  </span>
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -522,7 +613,62 @@ export default function GiftBoard({
       <div className={`toast${toastMsg ? " show" : ""}`} role="status" aria-live="polite">
         {toastMsg}
       </div>
+
+      {confetti > 0 && <Confetti key={confetti} />}
     </>
+  );
+}
+
+/** Tied on the end of the ribbon once everyone has handed in a gift. */
+function Bow() {
+  return (
+    <svg className="bow" width="44" height="32" viewBox="0 0 44 32" aria-hidden="true">
+      <path d="M22 15C18 4 4 2 5 11c.7 6.5 10 7 17 4z" fill="var(--ribbon)" />
+      <path d="M22 15C26 4 40 2 39 11c-.7 6.5-10 7-17 4z" fill="var(--ribbon)" />
+      <path d="M8 9.5c3 0 8 2 11.5 4.5M36 9.5c-3 0-8 2-11.5 4.5" stroke="var(--ribbon-deep)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      <path d="M20.5 16 14 29l3.6-1.2L19 31l4-14z" fill="var(--ribbon-deep)" />
+      <path d="M23.5 16 30 29l-3.6-1.2L25 31l-4-14z" fill="var(--ribbon-deep)" />
+      <rect x="18.5" y="11.5" width="7" height="7" rx="2.2" fill="var(--ribbon-deep)" />
+    </svg>
+  );
+}
+
+const CONFETTI_COLORS = ["#D4243B", "#0F7B5F", "#E8B031", "#16213A", "#F28C9B"];
+// fixed pseudo-random layout so rendering stays pure
+const CONFETTI = (() => {
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: 44 }, (_, i) => ({
+    x: rnd() * 100,
+    dx: (rnd() - 0.5) * 30,
+    r: rnd() * 360,
+    d: 1.9 + rnd() * 1.2,
+    delay: rnd() * 0.5,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    round: i % 4 === 0,
+  }));
+})();
+
+function Confetti() {
+  return (
+    <div className="confetti" aria-hidden="true">
+      {CONFETTI.map((c, i) => (
+        <span
+          key={i}
+          className={c.round ? "round" : undefined}
+          style={
+            {
+              "--x": `${c.x}%`,
+              "--dx": `${c.dx}vw`,
+              "--r": `${c.r}deg`,
+              "--d": `${c.d}s`,
+              "--delay": `${c.delay}s`,
+              "--c": c.color,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
   );
 }
 

@@ -45,7 +45,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
 /* the ribbon: the one loud thing on the page */
 .tally { margin: 14px 0 12px; }
 .tally-line { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.tally-done { font-size: 34px; font-weight: 700; line-height: 1; }
+.tally-done { display: inline-block; font-size: 34px; font-weight: 700; line-height: 1; transform-origin: left bottom; }
 .tally-of { color: var(--muted); font-size: 15px; }
 .tally-pct { margin-left: auto; font-weight: 600; color: var(--ribbon-deep); }
 .ribbon {
@@ -92,6 +92,7 @@ main { padding: 10px 16px 48px; }
   width: 100%; text-align: left;
   background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-row);
   padding: 12px 14px; margin-bottom: 6px;
+  transition: background-color .35s ease, border-color .2s ease;
 }
 .row:hover { border-color: var(--line); }
 .who-col { min-width: 0; }
@@ -104,6 +105,7 @@ main { padding: 10px 16px 48px; }
 .dot {
   width: 30px; height: 30px; border-radius: 50%;
   border: 2px dashed #B9C0CC; display: grid; place-items: center;
+  position: relative;
 }
 .row.got .dot { border: 0; background: var(--got); color: #fff; }
 .row.got .mark { color: var(--got); font-weight: 600; }
@@ -173,6 +175,64 @@ dialog[open] { animation: rise .25s cubic-bezier(.2,.8,.2,1); }
   opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 20; max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- moments ---------- */
+.ribbon-wrap { position: relative; }
+.ribbon.full .ribbon-fill::after { display: none; } /* the bow covers the end */
+.bow { position: absolute; right: -10px; top: 50%; margin-top: -17px; filter: drop-shadow(0 1px 1px rgba(22,33,58,.18)); }
+
+/* rows: animate the wrapper's grid track so a row can fold away to nothing */
+.list > li { display: grid; grid-template-rows: 1fr; }
+.list > li > div { min-height: 0; }
+.list > li.leaving > div { overflow: hidden; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .tally-done.bump { animation: bump .5s cubic-bezier(.2,.8,.2,1); }
+  @keyframes bump { 35% { transform: scale(1.22); color: var(--ribbon); } }
+
+  .ribbon-shine {
+    position: absolute; inset: 0;
+    background: linear-gradient(100deg, transparent 35%, rgba(255,255,255,.75) 50%, transparent 65%) no-repeat;
+    background-size: 200% 100%; background-position: 150% 0;
+    animation: shine .9s .35s ease-out forwards;
+  }
+  @keyframes shine { to { background-position: -50% 0; } }
+
+  .bow { animation: tie .6s .45s cubic-bezier(.3,1.6,.5,1) backwards; transform-origin: 50% 45%; }
+  @keyframes tie { from { transform: scale(0) rotate(-35deg); opacity: 0; } }
+
+  /* confirmed here: the dot pops, a ring bursts, the tick draws itself */
+  .row.celebrate .dot { animation: pop .5s cubic-bezier(.3,1.5,.5,1); }
+  .row.celebrate .dot::after {
+    content: ""; position: absolute; inset: -2px; border-radius: 50%;
+    border: 2px solid var(--got); animation: ring .65s ease-out forwards;
+  }
+  .row.celebrate .dot path { stroke-dasharray: 20; stroke-dashoffset: 20; animation: draw .3s .2s ease-out forwards; }
+  @keyframes pop { 0% { transform: scale(.4); } 60% { transform: scale(1.18); } }
+  @keyframes ring { from { transform: scale(1); opacity: .7; } to { transform: scale(2.1); opacity: 0; } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  /* changed on another admin's phone */
+  .row.remote { animation: remote 1.6s ease-out; }
+  .row.remote.got .dot { animation: pop .5s cubic-bezier(.3,1.5,.5,1); }
+  @keyframes remote { 0%, 35% { background-color: #FFF3CC; border-color: #EFCF73; } }
+
+  .list > li.leaving { animation: fold .42s cubic-bezier(.4,0,.2,1) forwards; }
+  @keyframes fold { to { grid-template-rows: 0fr; opacity: 0; transform: translateX(14px); } }
+
+  .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 30; }
+  .confetti span {
+    position: absolute; top: -16px; left: var(--x);
+    width: 8px; height: 13px; border-radius: 2px; background: var(--c);
+    opacity: 0; animation: fall var(--d) cubic-bezier(.25,.6,.45,1) var(--delay) forwards;
+  }
+  .confetti span.round { width: 9px; height: 9px; border-radius: 50%; }
+  @keyframes fall {
+    0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(var(--r)); }
+    85% { opacity: 1; }
+    100% { opacity: 0; transform: translate3d(var(--dx), 105vh, 0) rotate(calc(var(--r) + 600deg)); }
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
