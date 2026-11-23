@@ -474,7 +474,12 @@ export default function GiftBoard({
             </li>
           ))}
         </ul>
-        {!rows.length && <p className="empty">{emptyText}</p>}
+        {!rows.length && (
+          <div className="empty">
+            {filter === "pending" && !q && total > 0 && got === total && <GiftDone />}
+            <p>{emptyText}</p>
+          </div>
+        )}
         {updatedAt && <p className="updated">อัปเดตล่าสุด {updatedAt}</p>}
       </main>
 
@@ -633,7 +638,22 @@ function Bow() {
   );
 }
 
-const CONFETTI_COLORS = ["#D4243B", "#0F7B5F", "#E8B031", "#16213A", "#F28C9B"];
+/** Shown in the "ยังไม่ส่ง" tab once it is empty because everyone is done. */
+function GiftDone() {
+  return (
+    <svg className="done-art" width="112" height="112" viewBox="0 0 512 512" aria-hidden="true">
+      <path d="M256 214C232 146 152 124 150 182c-1 40 56 48 106 32z" fill="var(--ribbon)" />
+      <path d="M256 214C280 146 360 124 362 182c1 40-56 48-106 32z" fill="var(--ribbon)" />
+      <path d="M176 176c22 2 52 16 72 32M336 176c-22 2-52 16-72 32" stroke="var(--ribbon-deep)" strokeWidth="9" fill="none" strokeLinecap="round" />
+      <rect x="112" y="214" width="288" height="64" rx="16" fill="var(--ribbon)" />
+      <rect x="136" y="286" width="240" height="140" rx="14" fill="var(--ribbon)" />
+      <rect x="238" y="214" width="36" height="212" fill="#fff" />
+      <rect x="226" y="196" width="60" height="38" rx="12" fill="var(--ribbon-deep)" />
+    </svg>
+  );
+}
+
+const CONFETTI_COLORS =["#D4243B", "#0F7B5F", "#E8B031", "#16213A", "#F28C9B"];
 // fixed pseudo-random layout so rendering stays pure
 const CONFETTI = (() => {
   let seed = 7;

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#D4243B"/>
+  <!-- bow -->
+  <path d="M256 214C232 146 152 124 150 182c-1 40 56 48 106 32z" fill="#fff"/>
+  <path d="M256 214C280 146 360 124 362 182c1 40-56 48-106 32z" fill="#fff"/>
+  <path d="M176 176c22 2 52 16 72 32M336 176c-22 2-52 16-72 32" stroke="#D4243B" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <!-- lid and box, split by the ribbon -->
+  <rect x="112" y="214" width="288" height="64" rx="16" fill="#fff"/>
+  <rect x="136" y="286" width="240" height="122" rx="14" fill="#fff"/>
+  <rect x="238" y="214" width="36" height="194" fill="#D4243B"/>
+  <rect x="226" y="196" width="60" height="38" rx="12" fill="#fff"/>
+</svg>

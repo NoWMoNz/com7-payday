@@ -12,6 +12,7 @@ export const metadata: Metadata = {
   title: "เช็คของขวัญ",
   description: "เช็คว่าใครส่งของขวัญแล้วหรือยัง",
   robots: { index: false, follow: false },
+  appleWebApp: { capable: true, title: "เช็คของขวัญ", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
