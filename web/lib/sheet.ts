@@ -82,7 +82,7 @@ async function sheetsFetch(path: string, init?: RequestInit) {
   return res.json();
 }
 
-const a1 = (range: string) => encodeURIComponent(`'${SHEET_NAME.replace(/'/g, "''")}'!${range}`);
+const a1 = (range: string, tab = SHEET_NAME) => encodeURIComponent(`'${tab.replace(/'/g, "''")}'!${range}`);
 
 export function colLetter(col: number) {
   let s = "";
@@ -129,6 +129,29 @@ async function demoTable(): Promise<Table> {
 }
 
 /* ---------- public API ---------- */
+
+/**
+ * Read another tab of the same spreadsheet as text exactly as displayed
+ * (so a password like 0123 keeps its leading zero). Read-only, never cached here.
+ */
+export async function readTab(tab: string): Promise<Table> {
+  let values: Cell[][];
+  if (isDemo()) {
+    const res = await fetch(
+      `https://docs.google.com/spreadsheets/d/${sheetId()}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) throw new Error(`โหลดแท็บ "${tab}" ไม่สำเร็จ (${res.status})`);
+    values = parseCsv(await res.text());
+  } else {
+    const json = (await sheetsFetch(`/values/${a1("A1:ZZ", tab)}?valueRenderOption=FORMATTED_VALUE`)) as {
+      values?: Cell[][];
+    };
+    values = json.values ?? [];
+  }
+  const [header = [], ...rows] = values;
+  return { header: header.map(String), rows };
+}
 
 export async function readTable(): Promise<Table> {
   if (isDemo()) {
