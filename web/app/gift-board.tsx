@@ -4,8 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person } from "@/lib/people";
 import PhotoViewer from "./photo-viewer";
 import CompanyPicker from "./company-picker";
+import { Confetti } from "./effects";
+import HomeTab from "./home-tab";
+import DrillSheet, { type Drill } from "./drill-sheet";
+import { attachSheetDrag, markScrollable } from "./sheet-drag";
+import { companyOf, inScope, NO_SCOPE, pctOf, shownChief, type Scope } from "@/lib/stats";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { ChartIcon, HomeIcon, ListIcon } from "./tab-icons";
 
 type Filter = "pending" | "got" | "all";
+type Tab = "home" | "list";
 type Fx = "celebrate" | "remote" | "plain";
 
 const LEAVE_MS = 420; // matches the .leaving collapse in globals.css
@@ -41,8 +50,11 @@ function openSheet(d: HTMLDialogElement | null) {
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 const timeOf = (ts: string) => /(\d{1,2}:\d{2})/.exec(ts)?.[1] ?? "";
+const dateOf = (ts: string) => /(\d{1,2}\/\d{1,2}\/\d{4})/.exec(ts)?.[1] ?? "";
 const shortTs = (ts: string) => ts.replace(/(\d{1,2}:\d{2}):\d{2}$/, "$1");
 const photoSrc = (p: string) => `/api/photo?p=${encodeURIComponent(p)}`;
+/** The letter in a person's avatar: the first letter of the nickname, past titles like "คุณ" and leading vowels. */
+const initialOf = (s: string) => Array.from(s.replace(/^(คุณ|นาย|นางสาว|นาง|น\.ส\.)\s*/, "").replace(/^[เแโใไ]+/, "").trim())[0] ?? "•";
 
 class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -91,7 +103,16 @@ export default function GiftBoard({
   const [people, setPeople] = useState(initialPeople);
   const [adminName, setAdminName] = useState(initialAdminName);
   const [filter, setFilter] = useState<Filter>("pending");
-  const [company, setCompany] = useState("");
+  const [scope, setScope] = useState<Scope>(NO_SCOPE); // which company / Chief / department the list is narrowed to
+  const wantedTab = useSearchParams().get("tab"); // the overview page's tab bar links back here with ?tab=home / ?tab=list
+  const [tab, setTab] = useState<Tab>(
+    wantedTab === "home" || wantedTab === "list" ? wantedTab : initialAdminName ? "list" : "home", // admins are here to record gifts; everyone else to see how it is going
+  );
+  // the page is kept alive while the overview is open, so its state outlives the visit: follow the link's tab every time we come back
+  useEffect(() => {
+    if (wantedTab === "home" || wantedTab === "list") setTab(wantedTab);
+  }, [wantedTab]);
+  const [drill, setDrill] = useState<Drill | null>(null);
   const [q, setQ] = useState("");
   const [currentRow, setCurrentRow] = useState<number | null>(null);
   const [pending, setPending] = useState<{ blob: Blob; url: string } | null>(null);
@@ -106,6 +127,7 @@ export default function GiftBoard({
   const personDialog = useRef<HTMLDialogElement>(null);
   const loginDialog = useRef<HTMLDialogElement>(null);
   const photoDialog = useRef<HTMLDialogElement>(null);
+  const drillDialog = useRef<HTMLDialogElement>(null);
   const [badSrc, setBadSrc] = useState("");
   const toastEl = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -147,7 +169,7 @@ export default function GiftBoard({
     const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting));
     io.observe(s);
     return () => io.disconnect();
-  }, []);
+  }, [tab]);
 
   /** After changing a filter while scrolled down, start the list right under the search bar. */
   const jumpToList = () => {
@@ -161,101 +183,22 @@ export default function GiftBoard({
     });
   };
 
-  // Drag the person sheet down from anywhere on it (not just the handle) to close it.
-  // If the content is taller than the screen it scrolls instead, and only the handle/title drag.
+  // both bottom sheets close by dragging them down from anywhere (see sheet-drag.ts)
   useEffect(() => {
     const d = personDialog.current;
-    if (!d) return;
-    let startX = 0;
-    let startY = 0;
-    let dy = 0;
-    let t0 = 0;
-    let tracking = false; // a finger is down and might become a drag
-    let dragging = false; // it has become a downward drag
-    let moved = false;
-    const down = (e: PointerEvent) => {
-      moved = false; // every new touch starts clean
-      if (busyRef.current) return;
-      const t = e.target as Element;
-      const scrolls = d.classList.contains("scrolls");
-      if (scrolls && (!t.closest("[data-drag]") || t.closest("button"))) return; // let the content scroll
-      tracking = true;
-      dragging = false;
-      startX = e.clientX;
-      startY = e.clientY;
-      dy = 0;
-      t0 = performance.now();
-      // capture on the touched element itself so a tap still reaches its own button
-      t.setPointerCapture?.(e.pointerId);
-    };
-    // a drag must not also count as a tap on whatever is under the finger
-    const swallowClick = (e: MouseEvent) => {
-      if (!moved) return;
-      moved = false;
-      e.stopPropagation();
-      e.preventDefault();
-    };
-    const move = (e: PointerEvent) => {
-      if (!tracking) return;
-      const dx = e.clientX - startX;
-      const rawY = e.clientY - startY;
-      if (!dragging) {
-        if (Math.hypot(dx, rawY) < 8) return; // still a tap
-        moved = true;
-        if (rawY <= 0 || rawY < Math.abs(dx)) {
-          tracking = false; // sideways or upward: not ours
-          return;
-        }
-        dragging = true;
-        d.style.transition = "none";
-        d.style.userSelect = "none";
-      }
-      dy = Math.max(0, rawY);
-      d.style.transform = `translateY(${dy}px)`;
-      d.style.setProperty("--drag", String(Math.max(0, 1 - dy / 420))); // the dim backdrop fades as it goes
-    };
-    const up = () => {
-      if (!tracking) return;
-      tracking = false;
-      if (!dragging) return;
-      dragging = false;
-      d.style.userSelect = "";
-      const speed = dy / Math.max(1, performance.now() - t0);
-      if (dy > 110 || (dy > 30 && speed > 0.6)) {
-        d.style.transition = "transform .22s cubic-bezier(.4,0,1,1)";
-        d.style.transform = "translateY(100%)";
-        d.style.setProperty("--drag", "0");
-        setTimeout(() => {
-          d.close();
-          d.style.transition = "";
-          d.style.transform = "";
-          d.style.removeProperty("--drag");
-        }, 210);
-      } else {
-        d.style.transition = "transform .22s cubic-bezier(.2,.8,.2,1)";
-        d.style.transform = "";
-        d.style.removeProperty("--drag");
-      }
-    };
-    d.addEventListener("pointerdown", down);
-    d.addEventListener("pointermove", move);
-    d.addEventListener("pointerup", up);
-    d.addEventListener("pointercancel", up);
-    d.addEventListener("click", swallowClick, true);
-    return () => {
-      d.removeEventListener("click", swallowClick, true);
-      d.removeEventListener("pointerdown", down);
-      d.removeEventListener("pointermove", move);
-      d.removeEventListener("pointerup", up);
-      d.removeEventListener("pointercancel", up);
-    };
+    return d ? attachSheetDrag(d, () => !!busyRef.current) : undefined;
+  }, []);
+  useEffect(() => {
+    const d = drillDialog.current;
+    return d ? attachSheetDrag(d, () => false) : undefined;
   }, []);
 
-  // when the sheet is taller than the screen it has to scroll, so it can't also be dragged from the middle
+  // a sheet taller than the screen has to scroll, so it can't also be dragged from its middle
   useEffect(() => {
-    const d = personDialog.current;
-    if (!d) return;
-    const check = () => d.classList.toggle("scrolls", d.scrollHeight > d.clientHeight + 1);
+    const check = () => {
+      markScrollable(personDialog.current);
+      markScrollable(drillDialog.current);
+    };
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -371,18 +314,19 @@ export default function GiftBoard({
   }, [refresh]);
 
   /* ---------- derived ---------- */
-  const companies = useMemo(() => [...new Set(people.map((p) => p.company).filter(Boolean))], [people]);
+  const companies = useMemo(() => [...new Set(people.map(companyOf))], [people]);
   const companyOptions = useMemo(
     () => [
       { value: "", label: "ทุกบริษัท", count: people.length },
-      ...companies.map((c) => ({ value: c, label: c, count: people.filter((p) => p.company === c).length })),
+      ...companies.map((c) => ({ value: c, label: c, count: people.filter((p) => companyOf(p) === c).length })),
     ],
     [companies, people]
   );
-  const scoped = useMemo(() => people.filter((p) => !company || p.company === company), [people, company]);
+  const scoped = useMemo(() => people.filter((p) => inScope(p, scope)), [people, scope]);
+  const scopeLabel = [scope.company, scope.chief, scope.dept].filter(Boolean).join(" / ");
   const total = scoped.length;
   const got = scoped.filter((p) => p.received).length;
-  const pct = total ? Math.round((got / total) * 100) : 0;
+  const pct = pctOf(got, total);
 
   const outOfFilter = useCallback(
     (p: Person) => (filter === "pending" && p.received) || (filter === "got" && !p.received),
@@ -394,7 +338,7 @@ export default function GiftBoard({
     return scoped.filter((p) => {
       if (outOfFilter(p) && !held[p.row]) return false;
       if (!needle) return true;
-      return [p.name, p.nickname, p.nickShort, p.code, p.dept, p.position].some((v) => norm(v).includes(needle));
+      return [p.name, p.nickname, p.nickShort, p.code, p.company, p.chief, p.dept, p.position].some((v) => norm(v).includes(needle));
     });
   }, [scoped, outOfFilter, held, q]);
 
@@ -492,6 +436,24 @@ export default function GiftBoard({
     }
   };
 
+  /* ---------- home: opening a company, going to the list ---------- */
+  const openDrill = (company: string) => {
+    setDrill({ company, chief: "" });
+    openSheet(drillDialog.current);
+  };
+  const goList = (next: Scope) => {
+    closeSheet(drillDialog.current);
+    setScope(next);
+    setFilter("all"); // everyone in that group, so both who has sent and who has not are in view
+    setQ("");
+    setTab("list");
+    window.scrollTo({ top: 0 });
+  };
+  const switchTab = (t: Tab) => {
+    setTab(t);
+    window.scrollTo({ top: 0 });
+  };
+
   /* ---------- login ---------- */
   const [loginErr, setLoginErr] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
@@ -515,6 +477,7 @@ export default function GiftBoard({
       });
       closeSheet(loginDialog.current);
       setAdminName(res.name);
+      setTab("list"); // an admin who just signed in wants the people to record, not the summary
       toast(`เข้าสู่ระบบในชื่อ ${res.name}`);
       await refresh(); // pull admin-only fields (photos)
     } catch (err) {
@@ -537,157 +500,163 @@ export default function GiftBoard({
 
   return (
     <>
-      <header className="top">
+      <header className="appbar">
         <div className="wrap">
           <div className="bar">
-            <div>
+            <span className="logo" aria-hidden="true">
+              <GiftIcon />
+            </span>
+            <div className="bar-t">
               <h1>เช็คของขวัญ</h1>
-              <p className="who">
-                {isAdmin
-                  ? `แอดมิน: ${adminName} แตะชื่อเพื่อถ่ายรูปและบันทึกการรับ`
-                  : "ดูสถานะได้ทุกคน แอดมินเข้าสู่ระบบเพื่อบันทึกการรับ"}
-              </p>
+              <p className="who">{isAdmin ? `แอดมิน: ${adminName}` : "ดูสถานะได้ทุกคน"}</p>
             </div>
             <button className="link-btn" type="button" onClick={isAdmin ? onLogout : openLogin}>
               {isAdmin ? "ออกจากระบบ" : "เข้าสู่ระบบแอดมิน"}
             </button>
           </div>
-
-          <div className="tally">
-            <div className="tally-line">
-              <span key={shine} className={`tally-done${shine ? " bump" : ""}`}>
-                {got}
-              </span>
-              <span className="tally-of">จากทั้งหมด {total} คน ส่งของขวัญแล้ว</span>
-              <span className="tally-pct">{pct}%</span>
-            </div>
-            <div className="ribbon-wrap">
-              <div
-                className={`ribbon${total > 0 && got === total ? " full" : ""}`}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={pct}
-                aria-label="สัดส่วนคนที่ส่งของขวัญแล้ว"
-              >
-                <div className="ribbon-fill" style={{ width: `${pct}%` }}>
-                  {shine > 0 && <span key={shine} className="ribbon-shine" />}
-                </div>
-              </div>
-              {total > 0 && got === total && <Bow />}
-            </div>
-          </div>
-
         </div>
       </header>
 
-      <div ref={sentinel} aria-hidden="true" />
-      <div ref={dockRef} className={`dock${stuck ? " stuck" : ""}`}>
-        <div className="wrap">
-          <div className="controls">
-            <input
-              className="search"
-              type="search"
-              enterKeyHint="search"
-              placeholder="ค้นหาชื่อ หรือรหัส"
-              autoComplete="off"
-              aria-label="ค้นหา"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                jumpToList();
-              }}
-              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            />
-            <CompanyPicker
-              label="กรองตามบริษัท"
-              value={company}
-              options={companyOptions}
-              onChange={(v) => {
-                setCompany(v);
-                jumpToList();
-              }}
-            />
-            <div className="seg" role="tablist" aria-label="กรองตามสถานะ">
-              {(
-                [
-                  ["pending", "ยังไม่ส่ง", total - got],
-                  ["got", "ส่งแล้ว", got],
-                  ["all", "ทั้งหมด", total],
-                ] as const
-              ).map(([key, label, n]) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === key}
-                  onClick={() => {
-                    setFilter(key);
+      {tab === "home" ? (
+        <HomeTab people={people} shine={shine} onCompany={openDrill} />
+      ) : (
+        <>
+          <div ref={sentinel} aria-hidden="true" />
+          <div ref={dockRef} className={`dock${stuck ? " stuck" : ""}`}>
+            <div className="wrap">
+              <div className="controls">
+                <input
+                  className="search"
+                  type="search"
+                  enterKeyHint="search"
+                  placeholder="ค้นหาชื่อ รหัส หรือหน่วยงาน"
+                  autoComplete="off"
+                  aria-label="ค้นหา"
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
                     jumpToList();
                   }}
-                >
-                  {label} <span className="n">{n}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="dock-progress" style={{ width: `${pct}%` }} aria-hidden="true" />
-      </div>
-
-      <main>
-        <ul className="list" ref={listRef}>
-          {rows.map((p) => (
-            <li key={p.row} className={held[p.row] === "leaving" && outOfFilter(p) ? "leaving" : undefined}>
-              <div>
-                <button
-                  type="button"
-                  className={`row${isAdmin ? " admin" : ""}${p.received ? " got" : ""}${fx[p.row] ? ` ${fx[p.row]}` : ""}`}
-                  onClick={() => openPerson(p.row)}
-                >
-                  <span className="who-col">
-                    <span className="nick">{p.nickname || p.name}</span>
-                    <span className="full">{p.name}</span>
-                    <span className="meta">
-                      {p.position}
-                      {p.company ? `, ${p.company}` : ""}
-                    </span>
-                  </span>
-                  <span className="mark">
-                    {p.received ? (
-                      <>
-                        <span className="dot" aria-hidden="true">
-                          <CheckIcon />
-                        </span>
-                        ส่งแล้ว {timeOf(p.receivedAt)}
-                      </>
-                    ) : isAdmin ? (
-                      <>
-                        <span className="dot" aria-hidden="true">
-                          <CameraIcon size={16} stroke={2.2} />
-                        </span>
-                        รับของ
-                      </>
-                    ) : (
-                      <>
-                        <span className="dot" aria-hidden="true" />
-                        ยังไม่ส่ง
-                      </>
-                    )}
-                  </span>
-                </button>
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                />
+                <CompanyPicker
+                  label="กรองตามบริษัท"
+                  value={scope.company}
+                  options={companyOptions}
+                  onChange={(v) => {
+                    setScope({ company: v, chief: "", dept: "" });
+                    jumpToList();
+                  }}
+                />
+                <div className="seg" role="tablist" aria-label="กรองตามสถานะ">
+                  {(
+                    [
+                      ["pending", "ยังไม่ส่ง", total - got],
+                      ["got", "ส่งแล้ว", got],
+                      ["all", "ทั้งหมด", total],
+                    ] as const
+                  ).map(([key, label, n]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      aria-selected={filter === key}
+                      onClick={() => {
+                        setFilter(key);
+                        jumpToList();
+                      }}
+                    >
+                      {label} <span className="n">{n}</span>
+                    </button>
+                  ))}
+                </div>
+                {(scope.chief || scope.dept) && (
+                  <button
+                    type="button"
+                    className="scope-chip"
+                    onClick={() => {
+                      setScope(NO_SCOPE);
+                      jumpToList();
+                    }}
+                    aria-label={`ล้างตัวกรอง ${scopeLabel}`}
+                  >
+                    <span>{scopeLabel}</span>
+                    <span aria-hidden="true">✕</span>
+                  </button>
+                )}
               </div>
-            </li>
-          ))}
-        </ul>
-        {!rows.length && (
-          <div className="empty">
-            {filter === "pending" && !q && total > 0 && got === total && <GiftDone />}
-            <p>{emptyText}</p>
+            </div>
+            <div className="dock-progress" style={{ width: `${pct}%` }} aria-hidden="true" />
           </div>
-        )}
-        {updatedAt && <p className="updated">อัปเดตล่าสุด {updatedAt}</p>}
-      </main>
+
+          <main className="list-main">
+            {isAdmin && <p className="admin-hint">แตะชื่อเพื่อถ่ายรูปและบันทึกการรับ</p>}
+            <ul className="list" ref={listRef}>
+              {rows.map((p) => (
+                <li key={p.row} className={held[p.row] === "leaving" && outOfFilter(p) ? "leaving" : undefined}>
+                  <div>
+                    <button
+                      type="button"
+                      className={`row${isAdmin ? " admin" : ""}${p.received ? " got" : ""}${fx[p.row] ? ` ${fx[p.row]}` : ""}`}
+                      onClick={() => openPerson(p.row)}
+                    >
+                      <span className="av" aria-hidden="true">
+                        {initialOf(p.nickname || p.name)}
+                      </span>
+                      <span className="who-col">
+                        <span className="nick">{p.nickname || p.name}</span>
+                        <span className="full">{p.name}</span>
+                        <span className="meta">{[p.company, shownChief(p), p.dept].filter(Boolean).join(" / ")}</span>
+                      </span>
+                      <span className="mark">
+                        {p.received ? (
+                          <ReceivedMark p={p} />
+                        ) : isAdmin ? (
+                          <>
+                            <span className="dot" aria-hidden="true">
+                              <CameraIcon size={16} stroke={2.2} />
+                            </span>
+                            รับของ
+                          </>
+                        ) : (
+                          <>
+                            <span className="dot" aria-hidden="true" />
+                            ยังไม่ส่ง
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {!rows.length && (
+              <div className="empty">
+                {filter === "pending" && !q && total > 0 && got === total && <GiftDone />}
+                <p>{emptyText}</p>
+              </div>
+            )}
+            {updatedAt && <p className="updated">อัปเดตล่าสุด {updatedAt}</p>}
+          </main>
+        </>
+      )}
+
+      <nav className="tabbar" aria-label="เมนูหลัก">
+        <div className="tabbar-in">
+          <button type="button" className={tab === "home" ? "on" : undefined} aria-current={tab === "home" ? "page" : undefined} onClick={() => switchTab("home")}>
+            <HomeIcon />
+            หน้าหลัก
+          </button>
+          <button type="button" className={tab === "list" ? "on" : undefined} aria-current={tab === "list" ? "page" : undefined} onClick={() => switchTab("list")}>
+            <ListIcon />
+            รายชื่อ
+          </button>
+          <Link href="/dashboard">
+            <ChartIcon />
+            ภาพรวม
+          </Link>
+        </div>
+      </nav>
 
       {/* person / photo sheet */}
       <dialog
@@ -722,7 +691,8 @@ export default function GiftBoard({
                 {current.dept ? `, ${current.dept}` : ""}
               </p>
               <p>
-                {current.company} รหัสพนักงาน {current.code}
+                {current.company}
+                {shownChief(current) ? ` / ${shownChief(current)}` : ""} รหัสพนักงาน {current.code}
               </p>
             </div>
 
@@ -850,6 +820,25 @@ export default function GiftBoard({
         )}
       </dialog>
 
+      {/* company -> Chief -> department drill-down, opened from the home tab */}
+      <dialog
+        ref={drillDialog}
+        className="sheet-drill"
+        aria-labelledby="drillTitle"
+        onClick={(e) => e.target === e.currentTarget && closeSheet(drillDialog.current)}
+      >
+        {drill && (
+          <DrillSheet
+            people={people}
+            drill={drill}
+            onChief={(chief) => setDrill((d) => d && { ...d, chief })}
+            onBack={() => setDrill((d) => d && { ...d, chief: "" })}
+            onList={goList}
+            onClose={() => closeSheet(drillDialog.current)}
+          />
+        )}
+      </dialog>
+
       <PhotoViewer
         dialogRef={photoDialog}
         src={shotOk ? shotSrc : ""}
@@ -862,20 +851,6 @@ export default function GiftBoard({
 
       {confetti > 0 && <Confetti key={confetti} />}
     </>
-  );
-}
-
-/** Tied on the end of the ribbon once everyone has handed in a gift. */
-function Bow() {
-  return (
-    <svg className="bow" width="44" height="32" viewBox="0 0 44 32" aria-hidden="true">
-      <path d="M22 15C18 4 4 2 5 11c.7 6.5 10 7 17 4z" fill="var(--ribbon)" />
-      <path d="M22 15C26 4 40 2 39 11c-.7 6.5-10 7-17 4z" fill="var(--ribbon)" />
-      <path d="M8 9.5c3 0 8 2 11.5 4.5M36 9.5c-3 0-8 2-11.5 4.5" stroke="var(--ribbon-deep)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-      <path d="M20.5 16 14 29l3.6-1.2L19 31l4-14z" fill="var(--ribbon-deep)" />
-      <path d="M23.5 16 30 29l-3.6-1.2L25 31l-4-14z" fill="var(--ribbon-deep)" />
-      <rect x="18.5" y="11.5" width="7" height="7" rx="2.2" fill="var(--ribbon-deep)" />
-    </svg>
   );
 }
 
@@ -894,49 +869,31 @@ function GiftDone() {
   );
 }
 
-const CONFETTI_COLORS =["#D4243B", "#0F7B5F", "#E8B031", "#16213A", "#F28C9B"];
-// fixed pseudo-random layout so rendering stays pure
-const CONFETTI = (() => {
-  let seed = 7;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  return Array.from({ length: 44 }, (_, i) => ({
-    x: rnd() * 100,
-    dx: (rnd() - 0.5) * 30,
-    r: rnd() * 360,
-    d: 1.9 + rnd() * 1.2,
-    delay: rnd() * 0.5,
-    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-    round: i % 4 === 0,
-  }));
-})();
-
-function Confetti() {
+/** The right-hand mark of a row that has been received: who recorded it (admins only), the date and the time. */
+function ReceivedMark({ p }: { p: Person }) {
+  const date = dateOf(p.receivedAt);
+  const time = timeOf(p.receivedAt);
+  const bare = !p.checkedBy && !date && !time; // an old row with nothing recorded but the status
   return (
-    <div className="confetti" aria-hidden="true">
-      {CONFETTI.map((c, i) => (
-        <span
-          key={i}
-          className={c.round ? "round" : undefined}
-          style={
-            {
-              "--x": `${c.x}%`,
-              "--dx": `${c.dx}vw`,
-              "--r": `${c.r}deg`,
-              "--d": `${c.d}s`,
-              "--delay": `${c.delay}s`,
-              "--c": c.color,
-            } as React.CSSProperties
-          }
-        />
-      ))}
-    </div>
+    <>
+      <span className="dot" aria-hidden="true">
+        <GiftIcon size={17} stroke={2} />
+      </span>
+      {bare ? <span>ส่งแล้ว</span> : <span className="sr-only">ส่งแล้ว</span>}
+      {p.checkedBy && <span className="mark-name">{p.checkedBy}</span>}
+      {(date || time) && (
+        <span className="mark-when">
+          {date && <span>{date}</span>} {time && <span>{time}</span>}
+        </span>
+      )}
+    </>
   );
 }
 
-function CheckIcon() {
+function GiftIcon({ size = 22, stroke = 1.9 }: { size?: number; stroke?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7H8a2.5 2.5 0 1 1 0-5c3 0 4 5 4 5zM12 7h4a2.5 2.5 0 1 0 0-5c-3 0-4 5-4 5z" />
     </svg>
   );
 }

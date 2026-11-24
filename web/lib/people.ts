@@ -8,6 +8,8 @@ export type Person = {
   name: string;
   position: string;
   dept: string;
+  /** the "Chief" column: the executive area (CEO, CBO, ...) a person sits under; blank if the sheet has none */
+  chief: string;
   nickname: string;
   nickShort: string;
   received: boolean;
@@ -24,6 +26,7 @@ const H = {
   name: "ชื่อพนักงาน",
   position: "PositionName",
   dept: "หน่วยงาน",
+  chief: "Chief",
   nickname: "NickName",
   status: "Status",
   timestamp: "Timestamp",
@@ -61,6 +64,7 @@ function toPerson(r: Cell[], row: number, c: Cols, isAdmin: boolean): Person | n
     name,
     position: str(get(c.position)),
     dept: str(get(c.dept)),
+    chief: str(get(c.chief)),
     nickname: str(get(c.nickname)),
     nickShort: str(get(c.nickShort)),
     received: status === true || str(status).toUpperCase() === "TRUE",

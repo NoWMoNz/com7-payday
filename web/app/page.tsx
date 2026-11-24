@@ -45,33 +45,24 @@ function clock(d = new Date()) {
 function BoardSkeleton() {
   return (
     <>
-      <header className="top">
+      <header className="appbar">
         <div className="wrap">
           <div className="bar">
-            <div>
+            <span className="logo" aria-hidden="true" />
+            <div className="bar-t">
               <h1>เช็คของขวัญ</h1>
               <p className="who">กำลังโหลดรายชื่อ...</p>
             </div>
           </div>
-          <div className="tally">
-            <div className="tally-line">
-              <span className="tally-done">–</span>
-            </div>
-            <div className="ribbon" />
-          </div>
         </div>
       </header>
-      <div className="dock" aria-hidden="true">
+      <main className="home" aria-busy="true">
         <div className="wrap">
-          <div className="dock-skel" />
-        </div>
-      </div>
-      <main>
-        <ul className="list" aria-busy="true">
-          {Array.from({ length: 6 }, (_, i) => (
-            <li key={i} className="skeleton" />
+          <div className="skeleton" style={{ height: 150, borderRadius: 22 }} />
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="skeleton" style={{ height: 74, borderRadius: 20 }} />
           ))}
-        </ul>
+        </div>
       </main>
     </>
   );
