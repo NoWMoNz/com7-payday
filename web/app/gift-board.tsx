@@ -606,7 +606,7 @@ export default function GiftBoard({
                       <span className="who-col">
                         <span className="nick">{p.nickname || p.name}</span>
                         <span className="full">{p.name}</span>
-                        <span className="meta">{[p.company, shownChief(p), p.dept].filter(Boolean).join(" / ")}</span>
+                        <span className="meta">{[p.company, p.dept].filter(Boolean).join(" / ")}</span>
                       </span>
                       <span className="mark">
                         {p.received ? (
