@@ -316,6 +316,10 @@ html:has(dialog[open]) .toast { bottom: auto; top: calc(16px + env(safe-area-ins
   @keyframes gift-tilt { 0% { transform: rotate(0); } 35% { transform: rotate(-14deg); } 70% { transform: rotate(8deg); } 100% { transform: rotate(0); } }
   @keyframes mark-in { from { opacity: 0; transform: translateY(4px); } }
 
+  /* the header gift: pops in with the same overshoot as a received row, then tilts its lid (the empty loading placeholder is left still) */
+  .logo:has(svg) { animation: gift-in .55s .1s cubic-bezier(.3,1.5,.5,1) backwards; }
+  .logo svg { animation: gift-tilt .7s .45s ease-out backwards; transform-origin: 50% 80%; }
+
   /* confirmed here: the gift pops in and a ring bursts */
   .row.celebrate .dot { animation: pop .5s cubic-bezier(.3,1.5,.5,1); }
   .row.celebrate .dot::after {

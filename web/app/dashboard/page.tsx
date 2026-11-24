@@ -1,37 +1,15 @@
 import { Suspense } from "react";
-import { connection } from "next/server";
-import { listPeople, type Person } from "@/lib/people";
-import { wallNow } from "@/lib/stats";
-import Dashboard from "./dashboard";
+import DashboardLoader from "./dashboard-loader";
 
 export const metadata = { title: "ภาพรวม · เช็คของขวัญ" };
 
+/** A static shell like the list page: opens instantly, the data comes from /api/people or from memory. */
 export default function Page() {
   return (
     <Suspense fallback={<DashSkeleton />}>
-      <Data />
+      <DashboardLoader skeleton={<DashSkeleton />} />
     </Suspense>
   );
-}
-
-async function Data() {
-  await connection(); // always read the sheet per request
-  let result: { people: Person[] } | { error: string };
-  try {
-    // the same public view as the list page: totals and times only, never photos or who recorded them
-    result = { people: await listPeople(false) };
-  } catch (e) {
-    result = { error: (e as Error).message };
-  }
-  if ("error" in result) {
-    return (
-      <div className="error-box" role="alert">
-        <h2>โหลดข้อมูลจาก Google Sheet ไม่สำเร็จ</h2>
-        <p>{result.error}</p>
-      </div>
-    );
-  }
-  return <Dashboard initialPeople={result.people} asOf={wallNow()} />;
 }
 
 function DashSkeleton() {

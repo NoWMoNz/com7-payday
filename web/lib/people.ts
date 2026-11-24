@@ -3,6 +3,8 @@ import { readTable, writeCells, type Cell, type CellUpdate, type Table } from ".
 
 export type Person = {
   row: number;
+  /** the "ลำดับ" column: the running number in the sheet; blank if the sheet has none */
+  seq: string;
   code: string;
   company: string;
   name: string;
@@ -21,6 +23,7 @@ export type Person = {
 };
 
 const H = {
+  seq: "ลำดับ",
   code: "รหัสพนักงาน",
   company: "บริษัท",
   name: "ชื่อพนักงาน",
@@ -59,6 +62,7 @@ function toPerson(r: Cell[], row: number, c: Cols, isAdmin: boolean): Person | n
   const status = get(c.status);
   const p: Person = {
     row,
+    seq: str(get(c.seq)),
     code: str(get(c.code)),
     company: str(get(c.company)),
     name,
@@ -88,13 +92,29 @@ function photoPathFromCell(v: string) {
 
 /* short in-process cache so polling from several phones doesn't hammer the Sheets API */
 let cache: { at: number; table: Table } | null = null;
-const CACHE_MS = 3000;
+let inflight: Promise<Table> | null = null; // one sheet read at a time: concurrent callers share it
+let generation = 0; // bumped by every write, so a read that started before it can't put old data back in the cache
+const CACHE_MS = 10_000;
 
 async function table(fresh = false) {
   if (!fresh && cache && performance.now() - cache.at < CACHE_MS) return cache.table;
-  const t = await readTable();
-  cache = { at: performance.now(), table: t };
-  return t;
+  if (!fresh && inflight) return inflight;
+  const gen = generation;
+  const read = readTable()
+    .then((t) => {
+      if (gen === generation) cache = { at: performance.now(), table: t };
+      return t;
+    })
+    .finally(() => {
+      if (inflight === read) inflight = null;
+    });
+  inflight = read;
+  return read;
+}
+
+/** Start reading the sheet now (shared with the caller that needs it a moment later); errors surface there. */
+export function warmPeople() {
+  table().catch(() => {});
 }
 
 export async function listPeople(isAdmin: boolean): Promise<Person[]> {
@@ -141,6 +161,8 @@ export async function lockRow(row: number, code: string) {
 export async function saveRow(row: number, updates: CellUpdate[], isAdmin: boolean) {
   await writeCells(updates);
   cache = null;
+  generation++;
+  inflight = null;
   const t = await table(true);
   return toPerson(t.rows[row - 2] ?? [], row, columns(t.header), isAdmin);
 }

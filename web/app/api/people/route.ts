@@ -1,7 +1,8 @@
 import { getAdmin } from "@/lib/auth";
-import { listPeople } from "@/lib/people";
+import { listPeople, warmPeople } from "@/lib/people";
 
 export async function GET() {
+  warmPeople(); // read the list while we check who is asking, instead of one after the other
   const admin = await getAdmin();
   try {
     const people = await listPeople(!!admin);

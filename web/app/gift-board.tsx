@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person } from "@/lib/people";
+import { remember } from "@/lib/people-cache";
 import PhotoViewer from "./photo-viewer";
 import CompanyPicker from "./company-picker";
 import { Confetti } from "./effects";
@@ -95,10 +96,13 @@ export default function GiftBoard({
   initialPeople,
   initialAdminName,
   loadedAt,
+  stale = false,
 }: {
   initialPeople: Person[];
   initialAdminName: string | null;
   loadedAt: string;
+  /** the data came from memory rather than a fresh fetch: refresh it right away */
+  stale?: boolean;
 }) {
   const [people, setPeople] = useState(initialPeople);
   const [adminName, setAdminName] = useState(initialAdminName);
@@ -313,6 +317,18 @@ export default function GiftBoard({
     };
   }, [refresh]);
 
+  // opened from the copy kept in memory (coming back from the overview): show it now, then check the sheet at once
+  const refreshOnMount = useRef(stale);
+  useEffect(() => {
+    if (!refreshOnMount.current) return;
+    refreshOnMount.current = false;
+    refresh();
+  }, [refresh]);
+  // keep that copy current so the overview opens from it
+  useEffect(() => {
+    remember(people, adminName);
+  }, [people, adminName]);
+
   /* ---------- derived ---------- */
   const companies = useMemo(() => [...new Set(people.map(companyOf))], [people]);
   const companyOptions = useMemo(
@@ -338,7 +354,9 @@ export default function GiftBoard({
     return scoped.filter((p) => {
       if (outOfFilter(p) && !held[p.row]) return false;
       if (!needle) return true;
-      return [p.name, p.nickname, p.nickShort, p.code, p.company, p.chief, p.dept, p.position].some((v) => norm(v).includes(needle));
+      // the sheet's running number also matches as typed on screen: "12" or "No. 12"
+      const seq = p.seq ? [p.seq, `No. ${p.seq}`] : [];
+      return [p.name, p.nickname, p.nickShort, p.code, p.company, p.chief, p.dept, p.position, ...seq].some((v) => norm(v).includes(needle));
     });
   }, [scoped, outOfFilter, held, q]);
 
@@ -605,7 +623,7 @@ export default function GiftBoard({
                       </span>
                       <span className="who-col">
                         <span className="nick">{p.nickname || p.name}</span>
-                        <span className="full">{p.name}</span>
+                        <span className="full">{p.seq ? `${p.name} (No. ${p.seq})` : p.name}</span>
                         <span className="meta">{[p.company, p.dept].filter(Boolean).join(" / ")}</span>
                       </span>
                       <span className="mark">

@@ -1,45 +1,16 @@
 import { Suspense } from "react";
-import { connection } from "next/server";
-import { getAdmin } from "@/lib/auth";
-import { listPeople, type Person } from "@/lib/people";
-import GiftBoard from "./gift-board";
+import BoardLoader from "./board-loader";
 
+/**
+ * A static shell: it reads nothing on the server, so it is prefetched and opens instantly.
+ * The list itself comes from /api/people (or from memory when coming back from the overview).
+ */
 export default function Page() {
   return (
     <Suspense fallback={<BoardSkeleton />}>
-      <Board />
+      <BoardLoader skeleton={<BoardSkeleton />} />
     </Suspense>
   );
-}
-
-async function Board() {
-  await connection(); // always read the sheet per request
-  const admin = await getAdmin();
-  let result: { people: Person[] } | { error: string };
-  try {
-    result = { people: await listPeople(!!admin) };
-  } catch (e) {
-    result = { error: (e as Error).message };
-  }
-  if ("error" in result) {
-    return (
-      <div className="error-box" role="alert">
-        <h2>โหลดรายชื่อจาก Google Sheet ไม่สำเร็จ</h2>
-        <p>{result.error}</p>
-      </div>
-    );
-  }
-  return (
-    <GiftBoard
-      initialPeople={result.people}
-      initialAdminName={admin?.name ?? null}
-      loadedAt={clock()}
-    />
-  );
-}
-
-function clock(d = new Date()) {
-  return d.toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function BoardSkeleton() {

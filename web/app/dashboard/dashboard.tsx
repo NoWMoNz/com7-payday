@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { Person } from "@/lib/people";
+import { remember } from "@/lib/people-cache";
 import { ago, cheerOf, clock, computeStats, dayOf, dayShort, newlyReceived, pctOf, sortDepts, wallNow, type Group, type Stats } from "@/lib/stats";
 import { Confetti, EmptyGift } from "../effects";
 import { useCountUp } from "../use-count-up";
@@ -24,7 +25,7 @@ function CountUp({ value }: { value: number }) {
   return <>{useCountUp(value)}</>;
 }
 
-export default function Dashboard({ initialPeople, asOf }: { initialPeople: Person[]; asOf: number }) {
+export default function Dashboard({ initialPeople, asOf, stale = false }: { initialPeople: Person[]; asOf: number; stale?: boolean }) {
   const params = useSearchParams();
   const [people, setPeople] = useState(initialPeople);
   const [now, setNow] = useState(asOf); // wall-clock "now"; starts as the server's so the first paint matches
@@ -44,6 +45,7 @@ export default function Dashboard({ initialPeople, asOf }: { initialPeople: Pers
   const timers = useRef<number[]>([]);
   const wasComplete = useRef(initialPeople.length > 0 && initialPeople.every((p) => p.received));
 
+  const staleOnMount = useRef(stale);
   // the same rhythm as the list page: pull fresh data every 15 s while the page is visible
   useEffect(() => {
     let alive = true;
@@ -52,8 +54,10 @@ export default function Dashboard({ initialPeople, asOf }: { initialPeople: Pers
       try {
         const res = await fetch("/api/people", { cache: "no-store" });
         if (!res.ok) return;
-        const next = ((await res.json()) as { people: Person[] }).people;
+        const data = (await res.json()) as { people: Person[]; adminName?: string | null };
+        const next = data.people;
         if (!alive) return;
+        remember(next, data.adminName ?? null); // so the list page opens from this copy
         const added = newlyReceived(lastPeople.current, next);
         lastPeople.current = next;
         setPeople(next);
@@ -78,6 +82,7 @@ export default function Dashboard({ initialPeople, asOf }: { initialPeople: Pers
         /* keep what is on screen; the next pull retries */
       }
     };
+    if (staleOnMount.current) pull(); // opened from the copy kept in memory: check the sheet at once
     const id = setInterval(() => !document.hidden && pull(), 15000);
     const onVisible = () => !document.hidden && pull();
     document.addEventListener("visibilitychange", onVisible);
