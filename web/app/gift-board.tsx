@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person } from "@/lib/people";
+import PhotoViewer from "./photo-viewer";
 
 type Filter = "pending" | "got" | "all";
 type Fx = "celebrate" | "remote" | "plain";
@@ -704,7 +705,7 @@ export default function GiftBoard({
                         alt={`รูปของขวัญจาก ${current.nickname || current.name}`}
                         onError={() => setBadSrc(shotSrc)}
                       />
-                      <span className="zoom-hint">แตะเพื่อดูรูปใหญ่</span>
+                      <span className="zoom-hint">แตะเพื่อดูรูป</span>
                     </>
                   ) : shotSrc ? (
                     <span>
@@ -811,21 +812,11 @@ export default function GiftBoard({
         )}
       </dialog>
 
-      {/* full-size photo */}
-      <dialog
-        ref={photoDialog}
-        className="lightbox"
-        aria-label="รูปของขวัญ"
-        onClick={() => photoDialog.current?.close()}
-      >
-        {shotOk && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={shotSrc} alt={`รูปของขวัญจาก ${current?.nickname || current?.name || ""}`} />
-        )}
-        <button className="close lightbox-close" type="button" aria-label="ปิดรูป" onClick={() => photoDialog.current?.close()}>
-          ✕
-        </button>
-      </dialog>
+      <PhotoViewer
+        dialogRef={photoDialog}
+        src={shotOk ? shotSrc : ""}
+        alt={`รูปของขวัญจาก ${current?.nickname || current?.name || ""}`}
+      />
 
       <div ref={toastEl} popover="manual" className={`toast${toastMsg ? " show" : ""}`} role="status" aria-live="polite">
         {toastMsg}
