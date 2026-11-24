@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Person } from "@/lib/people";
 import PhotoViewer from "./photo-viewer";
+import CompanyPicker from "./company-picker";
 
 type Filter = "pending" | "got" | "all";
 type Fx = "celebrate" | "remote" | "plain";
@@ -371,6 +372,13 @@ export default function GiftBoard({
 
   /* ---------- derived ---------- */
   const companies = useMemo(() => [...new Set(people.map((p) => p.company).filter(Boolean))], [people]);
+  const companyOptions = useMemo(
+    () => [
+      { value: "", label: "ทุกบริษัท", count: people.length },
+      ...companies.map((c) => ({ value: c, label: c, count: people.filter((p) => p.company === c).length })),
+    ],
+    [companies, people]
+  );
   const scoped = useMemo(() => people.filter((p) => !company || p.company === company), [people, company]);
   const total = scoped.length;
   const got = scoped.filter((p) => p.received).length;
@@ -591,22 +599,15 @@ export default function GiftBoard({
               }}
               onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             />
-            <select
-              className="company"
-              aria-label="กรองตามบริษัท"
+            <CompanyPicker
+              label="กรองตามบริษัท"
               value={company}
-              onChange={(e) => {
-                setCompany(e.target.value);
+              options={companyOptions}
+              onChange={(v) => {
+                setCompany(v);
                 jumpToList();
               }}
-            >
-              <option value="">ทุกบริษัท</option>
-              {companies.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            />
             <div className="seg" role="tablist" aria-label="กรองตามสถานะ">
               {(
                 [
