@@ -7,7 +7,7 @@ const TAP_ZOOM = 2.5;
 
 /**
  * Full-screen photo. Double-tap zooms in/out at the finger, pinch zooms, drag pans
- * a zoomed photo, and swiping an unzoomed photo up or down closes it. A single tap
+ * a zoomed photo, and swiping an unzoomed photo in any direction closes it. A single tap
  * does nothing, so the photo only goes away via the ✕ button, a swipe, or Escape.
  * Gestures write straight to the DOM so they stay smooth without re-rendering.
  */
@@ -32,16 +32,24 @@ export default function PhotoViewer({
     const pts = new Map<number, { x: number; y: number }>();
     let start = { s: 1, tx: 0, ty: 0, x: 0, y: 0, t: 0, dist: 1, mx: 0, my: 0 };
     let moved = false;
-    let swiping = false; // dragging an unzoomed photo to dismiss it
+    let swiping = false; // dragging an unzoomed photo (any direction) to dismiss it
     let lastTap = { t: 0, x: 0, y: 0 };
     let leaving = false;
 
     const img = () => imgRef.current;
     const fade = (v: number) => d.style.setProperty("--fade", String(v));
-    const apply = (animate: boolean) => {
+    // "zoom": a slow, soft ease-in-out so a double-tap grows the photo gradually, like Facebook.
+    // "snap": a quick decelerating settle for springing back after a short swipe or pinch.
+    // Both move translate and scale on the same curve, so the tapped point stays under the finger.
+    const EASE = {
+      zoom: "transform .42s cubic-bezier(.45,.05,.25,1)",
+      snap: "transform .25s cubic-bezier(.2,.8,.2,1)",
+    };
+    const apply = (animate: false | "zoom" | "snap") => {
       const el = img();
       if (!el) return;
-      el.style.transition = animate ? "transform .25s cubic-bezier(.2,.8,.2,1)" : "none";
+      const quiet = animate && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.style.transition = animate && !quiet ? EASE[animate] : "none";
       el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${s})`;
     };
     const clampPan = () => {
@@ -109,9 +117,16 @@ export default function PhotoViewer({
       const dy = e.clientY - start.y;
       if (Math.hypot(dx, dy) > 6) moved = true;
       if (swiping) {
+        // the photo follows the finger anywhere and shrinks a little, like Facebook
+        tx = dx;
         ty = dy;
-        apply(false);
-        fade(Math.max(0.15, 1 - Math.abs(dy) / 450));
+        const dist = Math.hypot(dx, dy);
+        const el = img();
+        if (el) {
+          el.style.transition = "none";
+          el.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${1 - Math.min(0.12, dist / 2500)})`;
+        }
+        fade(Math.max(0.15, 1 - dist / 450));
       } else {
         tx = start.tx + dx;
         ty = start.ty + dy;
@@ -134,27 +149,30 @@ export default function PhotoViewer({
       if (pts.size > 0) return;
 
       if (swiping) {
-        const speed = Math.abs(ty) / Math.max(1, performance.now() - start.t);
-        if (Math.abs(ty) > 120 || (Math.abs(ty) > 40 && speed > 0.6)) {
-          // fling it off screen, then close
+        const dist = Math.hypot(tx, ty);
+        const speed = dist / Math.max(1, performance.now() - start.t);
+        if (dist > 120 || (dist > 40 && speed > 0.6)) {
+          // fling it off screen the way it was going, then close
           leaving = true;
+          const far = Math.max(window.innerWidth, window.innerHeight);
           const el = img();
           if (el) {
             el.style.transition = "transform .2s ease-in";
-            el.style.transform = `translate3d(0, ${Math.sign(ty) * window.innerHeight}px, 0)`;
+            el.style.transform = `translate3d(${tx + (tx / dist) * far}px, ${ty + (ty / dist) * far}px, 0) scale(.9)`;
           }
           d.style.transition = "--fade .2s";
           fade(0);
           setTimeout(() => d.close(), 200);
           return;
         }
+        tx = 0;
         ty = 0;
         d.style.transition = "--fade .25s";
         fade(1);
-        apply(true);
+        apply("snap");
       } else if (s < 1.02) {
         reset(); // pinched below full size: settle back
-        apply(true);
+        apply("snap");
       }
 
       if (!moved) {
@@ -166,7 +184,7 @@ export default function PhotoViewer({
             zoomAt(e.clientX, e.clientY, TAP_ZOOM);
             clampPan();
           }
-          apply(true);
+          apply("zoom");
           lastTap = { t: 0, x: 0, y: 0 };
         } else {
           lastTap = { t: now, x: e.clientX, y: e.clientY };
@@ -224,7 +242,7 @@ export default function PhotoViewer({
         ✕
       </button>
       <p className="lightbox-hint" aria-hidden="true">
-        แตะสองครั้งเพื่อซูม · ปัดขึ้นหรือลงเพื่อปิด
+        แตะสองครั้งเพื่อซูม · ปัดเพื่อปิด
       </p>
     </dialog>
   );

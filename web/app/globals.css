@@ -137,7 +137,7 @@ dialog {
   max-height: 92vh; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--surface); color: var(--ink);
 }
-dialog::backdrop { background: rgba(22,33,58,.45); }
+dialog::backdrop { background: rgb(22 33 58 / calc(.45 * var(--drag, 1))); } /* --drag fades it while the sheet is dragged */
 dialog[open] { animation: rise .25s cubic-bezier(.2,.8,.2,1); }
 @keyframes rise { from { transform: translateY(40px); opacity: 0; } }
 @media (min-width: 620px) { dialog { margin: auto; border-radius: var(--radius-sheet); } }
@@ -145,6 +145,8 @@ dialog[open] { animation: rise .25s cubic-bezier(.2,.8,.2,1); }
 .grab { width: 40px; height: 5px; border-radius: 3px; background: #CCD2DC; margin: 0 auto 12px; position: relative; }
 .grab::before { content: ""; position: absolute; inset: -14px -80px; } /* a bigger target for the thumb */
 [data-drag] { touch-action: none; cursor: grab; }
+/* the whole sheet takes drags, unless its content is tall enough to scroll */
+dialog.sheet-person:not(.scrolls) { touch-action: none; }
 .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .sheet-head h2 { margin: 0; font-size: 24px; line-height: 1.25; }
 .close { border: 0; background: #EEF0F4; width: 40px; height: 40px; border-radius: 50%; flex: none; font-size: 18px; line-height: 1; }
