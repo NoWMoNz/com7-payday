@@ -14,6 +14,29 @@ const without = <T,>(o: Record<number, T>, k: number) => {
   return next;
 };
 
+/** Slide a sheet away, then close it (Escape and the Android back button still close it at once). */
+function closeSheet(d: HTMLDialogElement | null) {
+  if (!d?.open || d.dataset.closing) return;
+  if (reducedMotion()) return d.close();
+  const token = String(Math.random());
+  d.dataset.closing = token;
+  const done = () => {
+    if (d.dataset.closing !== token) return;
+    d.removeEventListener("animationend", onEnd);
+    delete d.dataset.closing;
+    if (d.open) d.close();
+  };
+  const onEnd = (e: AnimationEvent) => e.target === d && done();
+  d.addEventListener("animationend", onEnd);
+  setTimeout(done, 400); // if the animation never runs
+}
+
+function openSheet(d: HTMLDialogElement | null) {
+  if (!d) return;
+  delete d.dataset.closing;
+  if (!d.open) d.showModal();
+}
+
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 const timeOf = (ts: string) => /(\d{1,2}:\d{2})/.exec(ts)?.[1] ?? "";
 const shortTs = (ts: string) => ts.replace(/(\d{1,2}:\d{2}):\d{2}$/, "$1");
@@ -82,6 +105,11 @@ export default function GiftBoard({
   const loginDialog = useRef<HTMLDialogElement>(null);
   const photoDialog = useRef<HTMLDialogElement>(null);
   const [badSrc, setBadSrc] = useState("");
+  const toastEl = useRef<HTMLDivElement>(null);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [stuck, setStuck] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const busyRef = useRef(busy);
   useEffect(() => {
@@ -94,6 +122,106 @@ export default function GiftBoard({
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(""), 2600);
+  }, []);
+
+  // the toast lives in the top layer so it shows above an open sheet (e.g. an upload error)
+  useEffect(() => {
+    const el = toastEl.current;
+    if (!el || typeof el.showPopover !== "function") return;
+    if (toastMsg) {
+      if (el.matches(":popover-open")) el.hidePopover(); // re-raise above a sheet opened since
+      el.showPopover();
+      return;
+    }
+    const id = setTimeout(() => el.matches(":popover-open") && el.hidePopover(), 250);
+    return () => clearTimeout(id);
+  }, [toastMsg]);
+
+  /* ---------- phone niceties ---------- */
+  // shadow under the search bar once it sticks to the top
+  useEffect(() => {
+    const s = sentinel.current;
+    if (!s) return;
+    const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting));
+    io.observe(s);
+    return () => io.disconnect();
+  }, []);
+
+  /** After changing a filter while scrolled down, start the list right under the search bar. */
+  const jumpToList = () => {
+    // wait for the new list to render, otherwise scroll anchoring moves us again
+    requestAnimationFrame(() => {
+      const list = listRef.current;
+      const dock = dockRef.current;
+      if (!list || !dock) return;
+      const top = list.getBoundingClientRect().top + window.scrollY - dock.offsetHeight - 8;
+      if (window.scrollY > top) window.scrollTo({ top, behavior: "auto" });
+    });
+  };
+
+  // drag the person sheet down by its handle/title to dismiss it
+  useEffect(() => {
+    const d = personDialog.current;
+    if (!d) return;
+    let startY = 0;
+    let dy = 0;
+    let t0 = 0;
+    let dragging = false;
+    let moved = false;
+    const down = (e: PointerEvent) => {
+      moved = false; // every new touch starts clean, even outside the handle
+      const t = e.target as Element;
+      const zone = t.closest("[data-drag]");
+      if (!zone || t.closest("button") || busyRef.current) return;
+      dragging = true;
+      startY = e.clientY;
+      dy = 0;
+      t0 = performance.now();
+      // capture on the handle, not the dialog: a click retargeted to the dialog reads as a backdrop tap
+      zone.setPointerCapture(e.pointerId);
+      d.style.transition = "none";
+    };
+    // a drag must not also count as a tap on whatever is under the finger
+    const swallowClick = (e: MouseEvent) => {
+      if (!moved) return;
+      moved = false;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    const move = (e: PointerEvent) => {
+      if (!dragging) return;
+      dy = Math.max(0, e.clientY - startY);
+      if (dy > 4) moved = true;
+      d.style.transform = `translateY(${dy}px)`;
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      const speed = dy / Math.max(1, performance.now() - t0);
+      d.style.transition = "transform .22s cubic-bezier(.2,.8,.2,1)";
+      if (dy > 110 || (dy > 30 && speed > 0.6)) {
+        d.style.transform = "translateY(100%)";
+        setTimeout(() => {
+          d.close();
+          d.style.transition = "";
+          d.style.transform = "";
+        }, 210);
+      } else {
+        d.style.transform = "";
+      }
+    };
+    d.addEventListener("pointerdown", down);
+    d.addEventListener("pointermove", move);
+    d.addEventListener("pointerup", up);
+    d.addEventListener("pointercancel", up);
+    d.addEventListener("click", swallowClick, true);
+    return () => {
+      d.removeEventListener("click", swallowClick, true);
+      d.removeEventListener("pointerdown", down);
+      d.removeEventListener("pointermove", move);
+      d.removeEventListener("pointerup", up);
+      d.removeEventListener("pointercancel", up);
+    };
   }, []);
 
   /* ---------- motion ---------- */
@@ -178,10 +306,14 @@ export default function GiftBoard({
     }
   }, [commit]);
 
+  // errors while a sheet is open show inside it: everything behind a modal sheet is inert
+  const [sheetErr, setSheetErr] = useState("");
   const handleError = useCallback(
     (e: unknown) => {
       if (e instanceof ApiError && e.status === 401) setAdminName(null);
-      toast((e as Error).message);
+      const msg = (e as Error).message;
+      if (personDialog.current?.open) setSheetErr(msg);
+      else toast(msg);
     },
     [toast]
   );
@@ -241,12 +373,14 @@ export default function GiftBoard({
   const openPerson = (row: number) => {
     setCurrentRow(row);
     clearPending();
-    personDialog.current?.showModal();
+    setSheetErr("");
+    openSheet(personDialog.current);
   };
 
-  const closePerson = () => personDialog.current?.close();
+  const closePerson = () => closeSheet(personDialog.current);
 
   const pickPhoto = () => {
+    setSheetErr("");
     if (!fileInput.current) return;
     fileInput.current.value = "";
     fileInput.current.click();
@@ -260,7 +394,7 @@ export default function GiftBoard({
       clearPending();
       setPending({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
-      toast((err as Error).message);
+      setSheetErr((err as Error).message);
     }
   };
 
@@ -270,6 +404,7 @@ export default function GiftBoard({
     if (!current || !pending) return;
     const wasReceived = current.received;
     setBusy("save");
+    setSheetErr("");
     try {
       const form = new FormData();
       form.set("row", String(current.row));
@@ -279,6 +414,7 @@ export default function GiftBoard({
       if (!wasReceived) mark(person.row, "celebrate", 900);
       replacePerson(person);
       closePerson();
+      navigator.vibrate?.(18); // a small tick on Android
       const who = person.nickname || person.name;
       toast(wasReceived ? `บันทึกรูปใหม่ของ ${who} แล้ว` : `รับของขวัญจาก ${who} แล้ว`);
     } catch (e) {
@@ -294,6 +430,7 @@ export default function GiftBoard({
     const who = current.nickname || current.name;
     if (!confirm(`ยกเลิกการรับของขวัญของ ${who}?\nสถานะจะกลับเป็น "ยังไม่ส่ง"`)) return;
     setBusy("undo");
+    setSheetErr("");
     try {
       const { person } = await api<{ person: Person }>("/api/unreceive", {
         method: "POST",
@@ -318,7 +455,7 @@ export default function GiftBoard({
   const openLogin = () => {
     setLoginErr("");
     setLoginOpen(true);
-    loginDialog.current?.showModal();
+    openSheet(loginDialog.current);
   };
 
   const onLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -332,7 +469,7 @@ export default function GiftBoard({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }),
       });
-      loginDialog.current?.close();
+      closeSheet(loginDialog.current);
       setAdminName(res.name);
       toast(`เข้าสู่ระบบในชื่อ ${res.name}`);
       await refresh(); // pull admin-only fields (photos)
@@ -397,17 +534,36 @@ export default function GiftBoard({
             </div>
           </div>
 
+        </div>
+      </header>
+
+      <div ref={sentinel} aria-hidden="true" />
+      <div ref={dockRef} className={`dock${stuck ? " stuck" : ""}`}>
+        <div className="wrap">
           <div className="controls">
             <input
               className="search"
               type="search"
+              enterKeyHint="search"
               placeholder="ค้นหาชื่อ หรือรหัส"
               autoComplete="off"
               aria-label="ค้นหา"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                setQ(e.target.value);
+                jumpToList();
+              }}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             />
-            <select className="company" aria-label="กรองตามบริษัท" value={company} onChange={(e) => setCompany(e.target.value)}>
+            <select
+              className="company"
+              aria-label="กรองตามบริษัท"
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                jumpToList();
+              }}
+            >
               <option value="">ทุกบริษัท</option>
               {companies.map((c) => (
                 <option key={c} value={c}>
@@ -423,17 +579,27 @@ export default function GiftBoard({
                   ["all", "ทั้งหมด", total],
                 ] as const
               ).map(([key, label, n]) => (
-                <button key={key} type="button" role="tab" aria-selected={filter === key} onClick={() => setFilter(key)}>
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === key}
+                  onClick={() => {
+                    setFilter(key);
+                    jumpToList();
+                  }}
+                >
                   {label} <span className="n">{n}</span>
                 </button>
               ))}
             </div>
           </div>
         </div>
-      </header>
+        <div className="dock-progress" style={{ width: `${pct}%` }} aria-hidden="true" />
+      </div>
 
       <main>
-        <ul className="list">
+        <ul className="list" ref={listRef}>
           {rows.map((p) => (
             <li key={p.row} className={held[p.row] === "leaving" && outOfFilter(p) ? "leaving" : undefined}>
               <div>
@@ -499,8 +665,8 @@ export default function GiftBoard({
       >
         {current && (
           <div className="sheet-body">
-            <div className="grab" />
-            <div className="sheet-head">
+            <div className="grab" data-drag />
+            <div className="sheet-head" data-drag>
               <div>
                 <h2 id="pName">{current.nickname || current.name}</h2>
                 <span className={`status-pill${current.received ? " got" : ""}`}>
@@ -568,6 +734,11 @@ export default function GiftBoard({
                     {current.checkedBy ? ` โดย ${current.checkedBy}` : ""}
                   </p>
                 )}
+                {sheetErr && (
+                  <p className="sheet-error" role="alert">
+                    {sheetErr}
+                  </p>
+                )}
                 <div className="actions">
                   {pending ? (
                     <>
@@ -604,14 +775,18 @@ export default function GiftBoard({
       </dialog>
 
       {/* login */}
-      <dialog ref={loginDialog} aria-labelledby="loginTitle" onClose={() => setLoginOpen(false)}
-        onClick={(e) => e.target === e.currentTarget && loginDialog.current?.close()}>
+      <dialog
+        ref={loginDialog}
+        className="login-sheet"
+        aria-labelledby="loginTitle"
+        onClose={() => setLoginOpen(false)}
+        onClick={(e) => e.target === e.currentTarget && closeSheet(loginDialog.current)}
+      >
         {loginOpen && (
           <form className="sheet-body" onSubmit={onLogin}>
-            <div className="grab" />
             <div className="sheet-head">
               <h2 id="loginTitle">เข้าสู่ระบบแอดมิน</h2>
-              <button className="close" type="button" aria-label="ปิด" onClick={() => loginDialog.current?.close()}>
+              <button className="close" type="button" aria-label="ปิด" onClick={() => closeSheet(loginDialog.current)}>
                 ✕
               </button>
             </div>
@@ -652,7 +827,7 @@ export default function GiftBoard({
         </button>
       </dialog>
 
-      <div className={`toast${toastMsg ? " show" : ""}`} role="status" aria-live="polite">
+      <div ref={toastEl} popover="manual" className={`toast${toastMsg ? " show" : ""}`} role="status" aria-live="polite">
         {toastMsg}
       </div>
 

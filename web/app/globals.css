@@ -22,28 +22,42 @@ body {
 }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
+button, input, select, label { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+html:has(dialog[open]) { overflow: hidden; } /* the page behind a sheet stays put */
 :focus-visible { outline: 3px solid var(--ribbon); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
 /* ---------- top ---------- */
 .top {
+  background: var(--paper);
+  padding: calc(14px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 2px max(16px, env(safe-area-inset-left));
+}
+.dock {
   position: sticky; top: 0; z-index: 5;
   background: var(--paper);
-  padding: 14px 16px 10px;
+  padding: 6px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
+  transition: box-shadow .2s ease;
 }
+.dock.stuck { box-shadow: 0 8px 18px -12px rgba(22,33,58,.45); }
+/* thin progress line so the count stays visible once the big ribbon has scrolled away */
+.dock-progress {
+  position: absolute; left: 0; bottom: -1px; height: 3px; background: var(--ribbon);
+  opacity: 0; transition: opacity .2s ease, width .6s cubic-bezier(.2,.8,.2,1);
+}
+.dock.stuck .dock-progress { opacity: 1; }
+.dock-skel { height: 104px; } /* same height as the real search bar, so nothing jumps on load */
 .wrap { max-width: 760px; margin: 0 auto; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
 .who { margin: 0; font-size: 13px; color: var(--muted); }
 .link-btn {
   background: none; border: 1px solid var(--line); border-radius: 999px;
-  padding: 6px 14px; font-size: 14px; font-weight: 500; white-space: nowrap;
+  padding: 6px 14px; font-size: 14px; font-weight: 500; white-space: nowrap; min-height: 40px;
 }
-.link-btn:hover { border-color: var(--ink); }
 
 /* the ribbon: the one loud thing on the page */
-.tally { margin: 14px 0 12px; }
+.tally { margin: 14px 0 6px; }
 .tally-line { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .tally-done { display: inline-block; font-size: 34px; font-weight: 700; line-height: 1; transform-origin: left bottom; }
 .tally-of { color: var(--muted); font-size: 15px; }
@@ -75,7 +89,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
 .seg { grid-column: 1 / -1; display: flex; background: #E6E9EF; border-radius: 12px; padding: 3px; }
 .seg button {
   flex: 1; border: 0; background: none; border-radius: 9px;
-  padding: 8px 10px; font-size: 14px; font-weight: 500; color: var(--muted); white-space: nowrap;
+  padding: 10px 10px; transition: background-color .15s ease, color .15s ease; font-size: 14px; font-weight: 500; color: var(--muted); white-space: nowrap;
 }
 .seg button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(22,33,58,.12); }
 .seg .n { font-weight: 400; opacity: .75; }
@@ -85,16 +99,15 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
 }
 
 /* ---------- list ---------- */
-main { padding: 10px 16px 48px; }
+main { padding: 10px max(16px, env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
 .list { list-style: none; margin: 0 auto; padding: 0; max-width: 760px; }
 .row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px;
   width: 100%; text-align: left;
   background: var(--surface); border: 1px solid transparent; border-radius: var(--radius-row);
   padding: 12px 14px; margin-bottom: 6px;
-  transition: background-color .35s ease, border-color .2s ease;
+  transition: background-color .35s ease, border-color .2s ease, transform .12s ease;
 }
-.row:hover { border-color: var(--line); }
 .who-col { min-width: 0; }
 .who-col > span { display: block; overflow-wrap: anywhere; }
 .row.got { background: var(--got-soft); }
@@ -121,7 +134,7 @@ main { padding: 10px 16px 48px; }
 /* ---------- bottom sheet ---------- */
 dialog {
   border: 0; padding: 0; margin: auto auto 0; width: 100%; max-width: 560px;
-  max-height: 92vh; border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  max-height: 92vh; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--surface); color: var(--ink);
 }
 dialog::backdrop { background: rgba(22,33,58,.45); }
@@ -129,10 +142,12 @@ dialog[open] { animation: rise .25s cubic-bezier(.2,.8,.2,1); }
 @keyframes rise { from { transform: translateY(40px); opacity: 0; } }
 @media (min-width: 620px) { dialog { margin: auto; border-radius: var(--radius-sheet); } }
 .sheet-body { padding: 10px 20px calc(20px + env(safe-area-inset-bottom)); }
-.grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 12px; }
+.grab { width: 40px; height: 5px; border-radius: 3px; background: #CCD2DC; margin: 0 auto 12px; position: relative; }
+.grab::before { content: ""; position: absolute; inset: -14px -80px; } /* a bigger target for the thumb */
+[data-drag] { touch-action: none; cursor: grab; }
 .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .sheet-head h2 { margin: 0; font-size: 24px; line-height: 1.25; }
-.close { border: 0; background: #EEF0F4; width: 34px; height: 34px; border-radius: 50%; flex: none; font-size: 18px; line-height: 1; }
+.close { border: 0; background: #EEF0F4; width: 40px; height: 40px; border-radius: 50%; flex: none; font-size: 18px; line-height: 1; }
 .facts { margin: 8px 0 16px; font-size: 14px; color: var(--muted); }
 .facts p { margin: 0; }
 .status-pill { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-top: 8px; background: #EEF0F4; color: var(--muted); }
@@ -172,6 +187,10 @@ dialog.lightbox::backdrop { background: #0E1628; }
 @keyframes fade { from { opacity: 0; } }
 .close:disabled { opacity: .4; }
 .received-note { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
+.sheet-error {
+  margin: 12px 0 0; padding: 10px 12px; border-radius: 12px;
+  background: #FDECEE; color: var(--ribbon-deep); font-size: 14px; font-weight: 500;
+}
 
 .actions { display: flex; gap: 10px; margin-top: 16px; }
 .btn {
@@ -179,7 +198,7 @@ dialog.lightbox::backdrop { background: #0E1628; }
   font-size: 16px; font-weight: 600; min-height: 52px;
 }
 .btn-primary { background: var(--ribbon); color: #fff; }
-.btn-primary:hover { background: var(--ribbon-deep); }
+
 .btn-primary:disabled { background: #C9CED8; cursor: progress; }
 .btn-quiet { background: #EEF0F4; color: var(--ink); }
 .btn-danger { background: none; color: var(--ribbon-deep); border: 1px solid #F0C3CA; }
@@ -191,11 +210,15 @@ dialog.lightbox::backdrop { background: #0E1628; }
 .error { color: var(--ribbon-deep); font-size: 14px; margin: 4px 0 0; min-height: 1.4em; }
 
 .toast {
+  inset: auto; margin: 0; border: 0; overflow: visible; width: max-content;
   position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
   background: var(--ink); color: #fff; padding: 11px 18px; border-radius: 12px; font-size: 15px;
   opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 20; max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+@starting-style { .toast.show { opacity: 0; transform: translate(-50%, 20px); } }
+/* with a sheet open, show messages at the top so they don't sit on the sheet's buttons */
+html:has(dialog[open]) .toast { bottom: auto; top: calc(16px + env(safe-area-inset-top)); }
 
 /* ---------- moments ---------- */
 .ribbon-wrap { position: relative; }
@@ -256,6 +279,33 @@ dialog.lightbox::backdrop { background: #0E1628; }
     85% { opacity: 1; }
     100% { opacity: 0; transform: translate3d(var(--dx), 105vh, 0) rotate(calc(var(--r) + 600deg)); }
   }
+}
+
+/* ---------- touch ---------- */
+@media (hover: hover) {
+  .row:hover { border-color: var(--line); }
+  .link-btn:hover { border-color: var(--ink); }
+  .btn-primary:hover { background: var(--ribbon-deep); }
+}
+.btn, .link-btn, .close, .shot { transition: transform .12s ease, background-color .15s ease; }
+.row:active { transform: scale(.985); }
+.btn:active:not(:disabled), .link-btn:active, .close:active:not(:disabled), .seg button:active { transform: scale(.96); }
+.shot:active:not(:disabled) { transform: scale(.99); }
+
+/* login sits at the top so the phone keyboard never covers it */
+dialog.login-sheet { margin: calc(12px + env(safe-area-inset-top)) auto auto; width: calc(100% - 24px); border-radius: var(--radius-sheet); }
+@media (min-width: 620px) { dialog.login-sheet { margin: auto; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open]::backdrop { animation: fade .25s ease-out; }
+  dialog.login-sheet[open] { animation: drop-in .25s cubic-bezier(.2,.8,.2,1); }
+  dialog[data-closing] { animation: sink .22s cubic-bezier(.4,0,1,1) forwards; }
+  dialog.login-sheet[data-closing] { animation: lift .2s ease-in forwards; }
+  dialog[data-closing]::backdrop { animation: fade-out .22s ease-in forwards; }
+  @keyframes drop-in { from { transform: translateY(-24px); opacity: 0; } }
+  @keyframes sink { to { transform: translateY(100%); } }
+  @keyframes lift { to { transform: translateY(-24px); opacity: 0; } }
+  @keyframes fade-out { to { opacity: 0; } }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -61,6 +61,11 @@ function BoardSkeleton() {
           </div>
         </div>
       </header>
+      <div className="dock" aria-hidden="true">
+        <div className="wrap">
+          <div className="dock-skel" />
+        </div>
+      </div>
       <main>
         <ul className="list" aria-busy="true">
           {Array.from({ length: 6 }, (_, i) => (
